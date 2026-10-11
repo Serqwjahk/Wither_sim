@@ -1,0 +1,105 @@
+# Build para Nintendo Switch (homebrew) con devkitPro.
+#
+# Requisitos (una sola vez):
+#   dkp-pacman -S switch-dev switch-sdl2
+#   export DEVKITPRO=/opt/devkitpro        (en Windows el instalador ya lo define)
+#
+# Compilar:   make -f Makefile.switch
+# Resultado:  wither-sim.nro  (copiar a la SD en /switch/wither-sim/)
+# Depurar:    nxlink -s wither-sim.nro      (ver printf/errores por red)
+#
+# Este Makefile sigue la plantilla oficial "application" de switch-examples.
+
+.SUFFIXES:
+
+ifeq ($(strip $(DEVKITPRO)),)
+$(error "Define DEVKITPRO en tu entorno: export DEVKITPRO=/opt/devkitpro")
+endif
+
+TOPDIR ?= $(CURDIR)
+include $(DEVKITPRO)/libnx/switch_rules
+
+TARGET      := wither-sim
+BUILD       := build_switch
+SOURCES     := src/core src/render src/platform
+INCLUDES    := src
+
+APP_TITLE   := Wither Sim
+APP_AUTHOR  := wither-sim
+APP_VERSION := 0.1.0
+
+# Para ver los mensajes por red con nxlink. Quita -DWM_NXLINK para una build final.
+DEFINES     := -D__SWITCH__ -DWM_NXLINK
+
+ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+
+CFLAGS      := -g -Wall -O2 -ffunction-sections $(ARCH) $(DEFINES)
+CXXFLAGS    := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
+ASFLAGS     := -g $(ARCH)
+LDFLAGS      = -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+
+# SDL2 de los portlibs de devkitPro (paquete switch-sdl2).
+SDL2_CONFIG := $(firstword $(wildcard $(DEVKITPRO)/portlibs/switch/bin/*sdl2-config))
+ifneq ($(SDL2_CONFIG),)
+  SDL_CFLAGS := $(shell $(SDL2_CONFIG) --cflags)
+  SDL_LIBS   := $(shell $(SDL2_CONFIG) --libs)
+else
+  SDL_CFLAGS := -I$(DEVKITPRO)/portlibs/switch/include/SDL2 -D_REENTRANT
+  SDL_LIBS   := -lSDL2 -lEGL -lglapi -ldrm_nouveau
+endif
+CFLAGS      += $(SDL_CFLAGS)
+CXXFLAGS    += $(SDL_CFLAGS)
+LIBS        := $(SDL_LIBS) -lnx
+
+LIBDIRS     := $(DEVKITPRO)/portlibs/switch $(LIBNX)
+
+NO_ICON     := 1
+
+#---------------------------------------------------------------------------------
+ifneq ($(BUILD),$(notdir $(CURDIR)))
+#---------------------------------------------------------------------------------
+
+export OUTPUT   := $(CURDIR)/$(TARGET)
+export TOPDIR   := $(CURDIR)
+export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
+export DEPSDIR  := $(CURDIR)/$(BUILD)
+
+CPPFILES        := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+
+export LD       := $(CXX)
+export OFILES   := $(CPPFILES:.cpp=.o)
+export INCLUDE  := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
+                   $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+                   -I$(CURDIR)/$(BUILD)
+export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
+
+export NROFLAGS += --nacp=$(CURDIR)/$(TARGET).nacp
+
+.PHONY: $(BUILD) clean all
+
+all: $(BUILD)
+
+$(BUILD):
+	@[ -d $@ ] || mkdir -p $@
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile.switch
+
+clean:
+	@echo limpiando ...
+	@rm -fr $(BUILD) $(TARGET).nro $(TARGET).nacp $(TARGET).elf
+
+#---------------------------------------------------------------------------------
+else
+.PHONY: all
+
+DEPENDS := $(OFILES:.o=.d)
+
+all : $(OUTPUT).nro
+
+$(OUTPUT).nro : $(OUTPUT).elf $(OUTPUT).nacp
+$(OUTPUT).elf : $(OFILES)
+
+-include $(DEPENDS)
+
+#---------------------------------------------------------------------------------
+endif
+#---------------------------------------------------------------------------------

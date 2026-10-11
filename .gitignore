@@ -1,0 +1,7 @@
+build/
+build_switch/
+*.nro
+*.elf
+*.nacp
+*.map
+*.ppm
